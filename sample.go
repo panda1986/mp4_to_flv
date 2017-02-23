@@ -4,6 +4,7 @@ import (
     ol "github.com/ossrs/go-oryx-lib/logger"
     "fmt"
     "io"
+    "reflect"
 )
 
 // The sample struct of mp4.
@@ -110,6 +111,8 @@ func (v *Mp4Decoder) Init(r io.Reader) (err error) {
             break
         }
 
+        ol.T(nil, fmt.Sprintf("main discover and decode a box, type:%v", reflect.TypeOf(box)))
+
         if err = box.DecodeHeader(r); err != nil {
             ol.E(nil, fmt.Sprintf("mp4 decode contained box header failed, err is %v", err))
             break
@@ -120,10 +123,16 @@ func (v *Mp4Decoder) Init(r io.Reader) (err error) {
             break
         }
 
+        ol.T(nil, fmt.Sprintf("parse box, type:%v", reflect.TypeOf(box)))
         if fbox, ok := box.(*Mp4FileTypeBox); ok {
             if err = v.parseFtyp(fbox); err != nil {
                 ol.E(nil, fmt.Sprintf("parse ftyp failed, err is %v", err))
-                return 
+                return
+            }
+        }else if fbox, ok := box.(*Mp4MovieBox); ok {
+            if err = v.parseMoov(fbox); err != nil {
+                ol.E(nil, fmt.Sprintf("parse moov failed, err is %v", err))
+                return
             }
         }
     }
@@ -145,6 +154,35 @@ func (v *Mp4Decoder) parseFtyp(box *Mp4FileTypeBox) (err error) {
     }
 
     v.brand = box.majorBrand
+    return
+}
+
+func (v *Mp4Decoder) parseMoov(box *Mp4MovieBox) (err error) {
+    ol.T(nil, fmt.Sprintf("...start to parse moov...."))
+    /*var mvhd *Mp4MovieHeaderBox
+    if mvhd, err = box.Mvhd(); err != nil {
+        ol.E(nil, fmt.Sprintf("mp4 missing mvhd box, err is:%v", err))
+        return
+    }
+
+    var vide *Mp4TrackBox
+    if vide, err = box.Video(); err != nil {
+        return
+    }*/
+
+    var soun *Mp4TrackBox
+    if soun, err = box.Audio(); err != nil {
+        return
+    }
+
+    var mp4a *Mp4AudioSampleEntry
+    if mp4a, err = soun.mp4a(); err != nil {
+        return
+    }
+
+    sr := mp4a.sampleRate >> 16
+    ol.T(nil, fmt.Sprintf("parse result, sr=%v", sr))
+
     return
 }
 

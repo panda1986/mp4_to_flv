@@ -12,6 +12,9 @@ func uint64DataSize(data interface{}) uint64 {
         return uint64(4)
     case int64, uint64, *int64, *uint64:
         return uint64(8)
+    case []uint8:
+        arru8 := data.([]uint8)
+        return uint64(len(arru8))
     }
     return 0
 }

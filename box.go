@@ -5,6 +5,7 @@ import (
     "io"
     ol "github.com/ossrs/go-oryx-lib/logger"
     "encoding/binary"
+    "reflect"
 )
 
 type Box interface {
@@ -46,17 +47,6 @@ func NewMp4Box() *Mp4Box {
     return v
 }
 
-// Box type helper.
-func (v *Mp4Box) IsFtyp() bool {
-    return v.BoxType == SrsMp4BoxTypeFTYP
-}
-func (v *Mp4Box) IsMoov() bool {
-    return v.BoxType == SrsMp4BoxTypeMOOV
-}
-func (v *Mp4Box) IsMdat() bool {
-    return v.BoxType == SrsMp4BoxTypeMDAT
-}
-
 // Get the size of box, whatever small or large size.
 func (v *Mp4Box) sz() uint64 {
     if v.SmallSize == SRS_MP4_USE_LARGE_SIZE {
@@ -72,13 +62,13 @@ func (v *Mp4Box) left() uint64 {
 
 // Get the contained box of specific type.
 // @return The first matched box.
-func (v *Mp4Box) get(bt uint32) (error, Box) {
+func (v *Mp4Box) get(bt uint32) (Box, error) {
     for _, box := range v.Boxes {
         if box.Basic().BoxType == bt {
-            return nil, box
+            return box, nil
         }
     }
-    return fmt.Errorf("can't find bt:%v in boxes", bt), nil
+    return nil, fmt.Errorf("can't find bt:%v in boxes", bt)
 }
 
 
@@ -141,7 +131,6 @@ func (v *Mp4Box) discovery(r io.Reader) (box Box, err error) {
         return
     }
 
-    ol.I(nil, fmt.Sprintf("discovery a new box small size=%v, large size=%v, bt=%x", smallSize, largeSize, bt))
     switch bt {
     case SrsMp4BoxTypeFTYP:
         box = NewMp4FileTypeBox()
@@ -167,8 +156,12 @@ func (v *Mp4Box) discovery(r io.Reader) (box Box, err error) {
         box = &Mp4DataInformationBox{}
     case SrsMp4BoxTypeSTBL:
         box = &Mp4SampleTableBox{}
+
     case SrsMp4BoxTypeAVC1:
         box = NewMp4VisualSampleEntry()
+    case SrsMp4BoxTypeMP4A:
+        box = &Mp4AudioSampleEntry{}
+
     case SrsMp4BoxTypeSTSD:
         box = NewMp4SampleDescritionBox()
     case SrsMp4BoxTypeSTTS:
@@ -193,13 +186,15 @@ func (v *Mp4Box) discovery(r io.Reader) (box Box, err error) {
     box.Basic().SmallSize = smallSize
     box.Basic().LargeSize = largeSize
     box.Basic().UsedSize = v.UsedSize
+
+    ol.T(nil, fmt.Sprintf("discovery a new box:%v small size=%v, large size=%v, bt=%x", reflect.TypeOf(box), smallSize, largeSize, bt))
     return
 }
 
 func (v *Mp4Box) DecodeBoxes(r io.Reader) (err error) {
     // read left space
     left := v.left()
-    ol.I(nil, fmt.Sprintf("after decode header, left space:%v", left))
+    ol.T(nil, fmt.Sprintf("after decode header, left space:%v", left))
     for {
         if left <= 0 {
             break
@@ -219,6 +214,9 @@ func (v *Mp4Box) DecodeBoxes(r io.Reader) (err error) {
             ol.E(nil, fmt.Sprintf("mp4 decode contained box boxes failed, err is %v", err))
             return
         }
+
+        ol.T(nil, fmt.Sprintf("box:%v decode boxes success, sub boxes=%v, box.sz=%v, left=%v %v.", reflect.TypeOf(box), len(box.Basic().Boxes), box.Basic().sz(), left, left - box.Basic().sz()))
+
         v.Boxes = append(v.Boxes, box)
 
         left -= box.Basic().sz()
@@ -227,9 +225,13 @@ func (v *Mp4Box) DecodeBoxes(r io.Reader) (err error) {
 }
 
 func (v *Mp4Box) Skip(r io.Reader, num uint64) {
+    if num <= 0 {
+        return
+    }
+
     data := make([]uint8, num)
     v.Read(r, data)
-    v.UsedSize += num
+    //v.UsedSize += num
     ol.I(nil, fmt.Sprintf("skip %v bytes", num))
 }
 
@@ -343,8 +345,34 @@ func NewMp4MovieBox() *Mp4MovieBox {
 }
 
 // Get the header of moov.
-func (v *Mp4MovieBox) Mvhd() *Mp4MovieHeaderBox {
-    return nil
+func (v *Mp4MovieBox) Mvhd() (*Mp4MovieHeaderBox, error) {
+    if box, err := v.get(SrsMp4BoxTypeMVHD); err != nil {
+        return nil, err
+    } else {
+        return box.(*Mp4MovieHeaderBox), nil
+    }
+}
+
+func (v *Mp4MovieBox) Video() (*Mp4TrackBox, error) {
+    for _, box := range v.Boxes {
+        if tbox, ok := box.(*Mp4TrackBox); ok {
+            if tbox.trackType() == SrsMp4TrackTypeVideo {
+                return tbox, nil
+            }
+        }
+    }
+    return nil, fmt.Errorf("can't find video trak box in moov")
+}
+
+func (v *Mp4MovieBox) Audio() (*Mp4TrackBox, error) {
+    for _, box := range v.Boxes {
+        if tbox, ok := box.(*Mp4TrackBox); ok {
+            if tbox.trackType() == SrsMp4TrackTypeAudio {
+                return tbox, nil
+            }
+        }
+    }
+    return nil, fmt.Errorf("can't find audio trak box in moov")
 }
 
 func (v *Mp4MovieBox) AddTrack() {
@@ -536,7 +564,6 @@ func (v *Mp4MovieHeaderBox) DecodeHeader(r io.Reader) (err error) {
  */
 type Mp4TrackBox struct {
     Mp4Box
-    TrackType uint8
 }
 
 func (v *Mp4TrackBox) Basic() *Mp4Box {
@@ -545,6 +572,55 @@ func (v *Mp4TrackBox) Basic() *Mp4Box {
 
 func (v *Mp4TrackBox) NdHeader() int {
     return v.Mp4Box.NbHeader()
+}
+
+func (v *Mp4TrackBox) trackType() int {
+    if box, err := v.get(SrsMp4BoxTypeMDIA); err != nil {
+        return SrsMp4TrackTypeForbidden
+    } else {
+        mdia := box.(*Mp4MediaBox)
+        return mdia.trackType()
+    }
+}
+
+func (v *Mp4TrackBox) mdia() (*Mp4MediaBox, error) {
+    if box, err := v.get(SrsMp4BoxTypeMDIA); err != nil {
+        return nil, err
+    } else {
+        return box.(*Mp4MediaBox), nil
+    }
+}
+
+func (v *Mp4TrackBox) minf() (*Mp4MediaInformationBox, error) {
+    if box, err := v.mdia(); err != nil {
+        return nil, err
+    } else {
+        return box.minf()
+    }
+}
+
+func (v *Mp4TrackBox) stbl() (*Mp4SampleTableBox, error) {
+    if box, err := v.minf(); err != nil {
+        return nil, err
+    } else {
+        return box.stbl()
+    }
+}
+
+func (v *Mp4TrackBox) stsd() (*Mp4SampleDescritionBox, error) {
+    if box, err := v.stbl(); err != nil {
+        return nil, err
+    } else {
+        return box.stsd()
+    }
+}
+
+func (v *Mp4TrackBox) mp4a() (*Mp4AudioSampleEntry, error) {
+    if box, err := v.stsd(); err != nil {
+        return nil, err
+    } else {
+        return box.mp4a()
+    }
 }
 
 /**
@@ -693,6 +769,29 @@ type Mp4MediaBox struct {
 
 func (v *Mp4MediaBox) Basic() *Mp4Box {
     return &v.Mp4Box
+}
+
+func (v *Mp4MediaBox) minf() (*Mp4MediaInformationBox, error) {
+    if box, err := v.get(SrsMp4BoxTypeMINF); err != nil {
+        return nil, err
+    } else {
+        return box.(*Mp4MediaInformationBox), nil
+    }
+}
+
+func (v *Mp4MediaBox) trackType() int {
+    if box, err := v.get(SrsMp4BoxTypeHDLR); err != nil {
+        return SrsMp4TrackTypeForbidden
+    } else {
+        hdlr := box.(*Mp4HandlerReferenceBox)
+        if hdlr.HandlerType == SrsMp4HandlerTypeSOUN {
+            return SrsMp4TrackTypeAudio
+        }
+        if hdlr.HandlerType == SrsMp4HandlerTypeVIDE {
+            return SrsMp4TrackTypeVideo
+        }
+    }
+    return SrsMp4TrackTypeForbidden
 }
 
 /**
@@ -861,6 +960,14 @@ func (v *Mp4MediaInformationBox) Basic() *Mp4Box {
     return &v.Mp4Box
 }
 
+func (v *Mp4MediaInformationBox) stbl() (*Mp4SampleTableBox, error) {
+    if box, err := v.get(SrsMp4BoxTypeSTBL); err != nil {
+        return nil, err
+    } else {
+        return box.(*Mp4SampleTableBox), nil
+    }
+}
+
 /**
  * 8.4.5.2 Video Media Header Box (vmhd)
  * ISO_IEC_14496-12-base-format-2012.pdf, page 38
@@ -936,6 +1043,14 @@ func (v *Mp4SampleTableBox) Basic() *Mp4Box {
     return &v.Mp4Box
 }
 
+func (v *Mp4SampleTableBox) stsd() (*Mp4SampleDescritionBox, error) {
+    if box, err := v.get(SrsMp4BoxTypeSTSD); err != nil {
+        return nil, err
+    } else {
+        return box.(*Mp4SampleDescritionBox), nil
+    }
+}
+
 /**
  * 8.5.2 Sample Description Box
  * ISO_IEC_14496-12-base-format-2012.pdf, page 43
@@ -982,7 +1097,7 @@ type Mp4VisualSampleEntry struct {
     VertResolution  uint32
     Reserved1       uint32
     FrameCount      uint16
-    CompressorName  [32]uint8
+    CompressorName  []uint8
     Depth           uint16
     PreDefined2     int16
 }
@@ -996,6 +1111,7 @@ func NewMp4VisualSampleEntry() *Mp4VisualSampleEntry {
         Depth: 0x0018,
         PreDefined2: -1,
     }
+    v.CompressorName = make([]uint8, 32)
     return v
 }
 
@@ -1034,11 +1150,13 @@ func (v *Mp4VisualSampleEntry) DecodeHeader(r io.Reader) (err error) {
         ol.E(nil, fmt.Sprintf("read avc1 frame count failed, err is %v", err))
         return
     }
+    ol.T(nil, fmt.Sprintf("after read frame count, usedSize=%v", v.UsedSize))
 
-    if err = v.Read(r, &v.CompressorName); err != nil {
+    if err = v.Read(r, v.CompressorName); err != nil {
         ol.E(nil, fmt.Sprintf("read avc1 compressor name failed, err is %v", err))
         return
     }
+    ol.T(nil, fmt.Sprintf("after read CompressorName, usedSize=%v", v.UsedSize))
 
     if err = v.Read(r, &v.Depth); err != nil {
         ol.E(nil, fmt.Sprintf("read avc1 depth failed, err is %v", err))
@@ -1047,7 +1165,53 @@ func (v *Mp4VisualSampleEntry) DecodeHeader(r io.Reader) (err error) {
 
     v.Skip(r, uint64(2))
 
-    ol.I(nil, fmt.Sprintf("decode avc1 succes, data:%+v", v))
+    v.Skip(r, v.left())
+
+    ol.T(nil, fmt.Sprintf("decode avc1 succes, data:%+v, left:%v", v, v.left()))
+    return
+}
+
+/**
+ * 8.5.2 Sample Description Box (mp4a)
+ * ISO_IEC_14496-12-base-format-2012.pdf, page 45
+ */
+type Mp4AudioSampleEntry struct {
+    Mp4SampleEntry
+    reserved0 uint64
+    channelCount uint16
+    sampleSize uint16
+    preDefined0 uint16
+    reserved1 uint16
+    sampleRate uint32
+}
+
+func (v *Mp4AudioSampleEntry) DecodeHeader(r io.Reader) (err error) {
+    if err = v.Mp4SampleEntry.DecodeHeader(r); err != nil {
+        return
+    }
+
+    v.Skip(r, uint64(8))
+
+    if err = v.Read(r, &v.channelCount); err != nil {
+        ol.E(nil, fmt.Sprintf("read mp4a channel count failed, err is %v", err))
+        return
+    }
+
+    if err = v.Read(r, &v.sampleSize); err != nil {
+        ol.E(nil, fmt.Sprintf("read mp4a sample size failed, err is %v", err))
+        return
+    }
+
+    v.Skip(r, uint64(2))
+    v.Skip(r, uint64(2))
+
+    if err = v.Read(r, &v.sampleRate); err != nil {
+        ol.E(nil, fmt.Sprintf("read mp4a sample rate failed, err is %v", err))
+        return
+    }
+
+    v.Skip(r, v.left())
+    ol.T(nil, fmt.Sprintf("decode mp4a succes, data:%+v %v", v, v.left()))
     return
 }
 
@@ -1086,23 +1250,32 @@ func (v *Mp4SampleDescritionBox) DecodeHeader(r io.Reader) (err error) {
 
     for i := 0; i < int(nbEntries); i++ {
         mb := NewMp4Box()
-        var box Box
-        if box, err = mb.discovery(r); err != nil {
+        var subBox Box
+        if subBox, err = mb.discovery(r); err != nil {
             return
         }
 
-        if err = box.DecodeHeader(r); err != nil {
+        if err = subBox.DecodeHeader(r); err != nil {
             return
         }
 
-        v.Entries = append(v.Entries, box)
-        v.UsedSize += box.Basic().sz()
+        v.Entries = append(v.Entries, subBox)
+        v.UsedSize += subBox.Basic().sz()
 
-        ol.I(nil, fmt.Sprintf("decode one entry, basic.sz=%v, usedSize=%v, left=%v", box.Basic().sz(), v.UsedSize, v.left()))
+        ol.T(nil, fmt.Sprintf("decode one entry, box:%v, basic.sz=%v, usedSize=%v, left=%v", reflect.TypeOf(subBox), subBox.Basic().sz(), v.UsedSize, v.left()))
     }
 
-    ol.I(nil, fmt.Sprintf("decode stsd box success, box:%+v", v))
+    ol.T(nil, fmt.Sprintf("decode stsd box success, box:%+v", v))
     return
+}
+
+func (v *Mp4SampleDescritionBox) mp4a() (*Mp4AudioSampleEntry, error) {
+    for _, entry := range v.Entries {
+        if et, ok := entry.(*Mp4AudioSampleEntry); ok {
+            return et, nil
+        }
+    }
+    return nil, fmt.Errorf("can't find mp4a in stsd")
 }
 
 /**
