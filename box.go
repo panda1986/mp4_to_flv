@@ -159,8 +159,12 @@ func (v *Mp4Box) discovery(r io.Reader) (box Box, err error) {
 
     case SrsMp4BoxTypeAVC1:
         box = NewMp4VisualSampleEntry()
+    case SrsMp4BoxTypeAVCC:
+        box = &Mp4AvccBox{}
     case SrsMp4BoxTypeMP4A:
         box = &Mp4AudioSampleEntry{}
+    case SrsMp4BoxTypeESDS:
+        box = NewMp4EsdsBox()
 
     case SrsMp4BoxTypeSTSD:
         box = NewMp4SampleDescritionBox()
@@ -187,7 +191,7 @@ func (v *Mp4Box) discovery(r io.Reader) (box Box, err error) {
     box.Basic().LargeSize = largeSize
     box.Basic().UsedSize = v.UsedSize
 
-    ol.T(nil, fmt.Sprintf("discovery a new box:%v small size=%v, large size=%v, bt=%x", reflect.TypeOf(box), smallSize, largeSize, bt))
+    ol.I(nil, fmt.Sprintf("discovery a new box:%v small size=%v, large size=%v, bt=%x", reflect.TypeOf(box), smallSize, largeSize, bt))
     return
 }
 
@@ -215,7 +219,7 @@ func (v *Mp4Box) DecodeBoxes(r io.Reader) (err error) {
             return
         }
 
-        ol.T(nil, fmt.Sprintf("box:%v decode boxes success, sub boxes=%v, box.sz=%v, left=%v %v.", reflect.TypeOf(box), len(box.Basic().Boxes), box.Basic().sz(), left, left - box.Basic().sz()))
+        ol.I(nil, fmt.Sprintf("box:%v decode boxes success, sub boxes=%v, box.sz=%v, left=%v %v.", reflect.TypeOf(box), len(box.Basic().Boxes), box.Basic().sz(), left, left - box.Basic().sz()))
 
         v.Boxes = append(v.Boxes, box)
 
@@ -478,6 +482,9 @@ func NewMp4MovieHeaderBox() *Mp4MovieHeaderBox {
 
 // Get the duration in ms
 func (v *Mp4MovieHeaderBox) Duration() uint64 {
+    if v.TimeScale > 0 {
+        return v.DurationInTbn * 1000 / uint64(v.TimeScale)
+    }
     return 0
 }
 
@@ -574,6 +581,36 @@ func (v *Mp4TrackBox) NdHeader() int {
     return v.Mp4Box.NbHeader()
 }
 
+func (v *Mp4TrackBox) vide_codec() (codec int) {
+    codec = SrsVideoCodecIdForbidden
+    if box, err := v.stsd(); err != nil {
+        return
+    } else if len(box.Entries) == 0 {
+        return
+    } else {
+        entry := box.Entries[0]
+        if _, ok := entry.(*Mp4AvccBox); ok {
+            codec = SrsVideoCodecIdAVC
+        }
+    }
+    return
+}
+
+func (v *Mp4TrackBox) soun_codec() (codec int) {
+    codec = SrsAudioCodecIdForbidden
+    if box, err := v.stsd(); err != nil {
+        return
+    } else if len(box.Entries) == 0 {
+        return
+    } else {
+        entry := box.Entries[0]
+        if _, ok := entry.(*Mp4AudioSampleEntry); ok {
+            codec = SrsAudioCodecIdAAC
+        }
+    }
+    return
+}
+
 func (v *Mp4TrackBox) trackType() int {
     if box, err := v.get(SrsMp4BoxTypeMDIA); err != nil {
         return SrsMp4TrackTypeForbidden
@@ -620,6 +657,30 @@ func (v *Mp4TrackBox) mp4a() (*Mp4AudioSampleEntry, error) {
         return nil, err
     } else {
         return box.mp4a()
+    }
+}
+
+func (v *Mp4TrackBox) avc1() (*Mp4VisualSampleEntry, error) {
+    if box, err := v.stsd(); err != nil {
+        return nil, err
+    } else {
+        return box.avc1()
+    }
+}
+
+func (v *Mp4TrackBox) avcc() (*Mp4AvccBox, error) {
+    if box, err := v.avc1(); err != nil {
+        return nil, err
+    } else {
+        return box.avcc()
+    }
+}
+
+func (v *Mp4TrackBox) asc() (*Mp4DecoderSpecificInfo, error) {
+    if box, err := v.mp4a(); err != nil {
+        return nil, err
+    } else {
+        return box.asc()
     }
 }
 
@@ -1164,10 +1225,40 @@ func (v *Mp4VisualSampleEntry) DecodeHeader(r io.Reader) (err error) {
     }
 
     v.Skip(r, uint64(2))
-
-    v.Skip(r, v.left())
-
     ol.T(nil, fmt.Sprintf("decode avc1 succes, data:%+v, left:%v", v, v.left()))
+    return
+}
+
+func (v *Mp4VisualSampleEntry) avcc() (*Mp4AvccBox, error) {
+    if box, err := v.get(SrsMp4BoxTypeAVCC); err != nil {
+        return nil, err
+    } else {
+        return box.(*Mp4AvccBox), nil
+    }
+}
+
+/**
+ * 5.3.4 AVC Video Stream Definition (avcC)
+ * ISO_IEC_14496-15-AVC-format-2012.pdf, page 19
+ */
+type Mp4AvccBox struct {
+    Mp4Box
+    nbConfig int
+    avcConfig []uint8
+}
+
+func (v *Mp4AvccBox) Basic() *Mp4Box {
+    return &v.Mp4Box
+}
+
+func (v *Mp4AvccBox) DecodeHeader(r io.Reader) (err error) {
+    v.nbConfig = int(v.left())
+    v.avcConfig = make([]uint8, v.nbConfig)
+    if err = v.Read(r, v.avcConfig); err != nil {
+        ol.E(nil, fmt.Sprintf("read avcc config failed, err is %v", err))
+        return
+    }
+    ol.T(nil, fmt.Sprintf("read avcc box success, nv config=%v", v.nbConfig))
     return
 }
 
@@ -1210,9 +1301,342 @@ func (v *Mp4AudioSampleEntry) DecodeHeader(r io.Reader) (err error) {
         return
     }
 
-    v.Skip(r, v.left())
     ol.T(nil, fmt.Sprintf("decode mp4a succes, data:%+v %v", v, v.left()))
     return
+}
+
+func (v *Mp4AudioSampleEntry) esds() (*Mp4EsdsBox, error) {
+    if box, err := v.get(SrsMp4BoxTypeESDS); err != nil {
+        return nil, err
+    } else {
+        return box.(*Mp4EsdsBox), nil
+    }
+}
+
+func (v *Mp4AudioSampleEntry) asc() (*Mp4DecoderSpecificInfo, error) {
+    if box, err := v.esds(); err != nil {
+        return nil, err
+    } else {
+        return box.asc()
+    }
+}
+
+/**
+ * 7.2.2.2 BaseDescriptor
+ * ISO_IEC_14496-1-System-2010.pdf, page 32
+ */
+type Mp4BaseDescriptor struct {
+    // The values of the class tags are
+    // defined in Table 2. As an expandable class the size of each class instance in bytes is encoded and accessible
+    // through the instance variable sizeOfInstance (see 8.3.3).
+    tag uint8 // bit(8)
+    // The decoded or encoded variant length.
+    vlen int32 // bit(28)
+
+    total int32
+
+    usedSize int32
+}
+
+func (v *Mp4BaseDescriptor) decodeHeader(r io.Reader) (err error) {
+    if err = binary.Read(r, binary.BigEndian, &v.tag); err != nil {
+        ol.E(nil, fmt.Sprintf("read desc tag failed, err is %v", err))
+        return
+    }
+    v.total += 1
+
+    var vsize uint8
+    var length int32
+    for {
+        if err = binary.Read(r, binary.BigEndian, &vsize); err != nil {
+            ol.E(nil, fmt.Sprintf("read desc 1byte size failed, err is %v", err))
+            return
+        }
+        length = (length << 7) | int32(vsize & 0x7f)
+        v.total += 1
+
+        if (vsize & 0x80 ) != 0x80 {
+            break
+        }
+    }
+    v.vlen = length
+    v.total += length
+    return
+}
+
+func (v *Mp4BaseDescriptor) Read(r io.Reader, data interface{}) (err error) {
+    if err = binary.Read(r, binary.BigEndian, data); err != nil {
+        return
+    }
+    v.usedSize += int32(uint64DataSize(data))
+    return
+}
+
+func (v *Mp4BaseDescriptor) totalSize() int32 {
+    return v.total
+}
+
+func (v *Mp4BaseDescriptor) left() int32 {
+    return v.vlen - v.usedSize
+}
+
+/**
+ * 7.2.6.7 DecoderSpecificInfo
+ * ISO_IEC_14496-1-System-2010.pdf, page 51
+ */
+type Mp4DecoderSpecificInfo struct {
+    Mp4BaseDescriptor
+    asc []uint8
+}
+
+func NewMp4DecoderSpecificInfo() *Mp4DecoderSpecificInfo {
+    v := &Mp4DecoderSpecificInfo{
+        asc: []uint8{},
+    }
+    return v
+}
+
+func (v *Mp4DecoderSpecificInfo) decode(r io.Reader) (err error) {
+    if err = v.Mp4BaseDescriptor.decodeHeader(r); err != nil {
+        return
+    }
+
+    v.asc = make([]uint8, v.vlen)
+    if err = v.Read(r, v.asc); err != nil {
+        ol.E(nil, fmt.Sprintf("read DecoderSpecificInfo asc failed, err is %v", err))
+        return
+    }
+
+    ol.T(nil, fmt.Sprintf("decode specificInfo:asc:%+v", v.asc))
+    return
+}
+
+/**
+ * 7.2.6.6 DecoderConfigDescriptor
+ * ISO_IEC_14496-1-System-2010.pdf, page 48
+ */
+type Mp4DecoderConfigDescriptor struct {
+    Mp4BaseDescriptor
+
+    // an indication of the object or scene description type that needs to be supported
+    // by the decoder for this elementary stream as per Table 5.
+    objectTypeIndication uint8 // bit(8)
+    streamType uint8 // bit(6)
+    upStream uint8 // bit(1)
+    reserved uint8 // bit(1)
+    bufferSizeDB uint32 // bit(24)
+    maxBitrate uint32
+    avgBitrate uint32
+    descSpecificInfo *Mp4DecoderSpecificInfo // optional.
+}
+
+func NewMp4DecoderConfigDescriptor() *Mp4DecoderConfigDescriptor {
+    v := &Mp4DecoderConfigDescriptor {
+        descSpecificInfo: &Mp4DecoderSpecificInfo{},
+    }
+    return v
+}
+
+func (v *Mp4DecoderConfigDescriptor) decode(r io.Reader) (err error) {
+    if err = v.Mp4BaseDescriptor.decodeHeader(r); err != nil {
+        return
+    }
+
+    if err = v.Read(r, &v.objectTypeIndication); err != nil {
+        ol.E(nil, fmt.Sprintf("read DecoderConfigDescriptor objectTypeIndication failed, err is %v", err))
+        return
+    }
+
+    var data uint8
+    if err = v.Read(r, &data); err != nil {
+        ol.E(nil, fmt.Sprintf("read DecoderConfigDescriptor data failed, err is %v", err))
+        return
+    }
+    v.upStream = (data >> 1) & 0x01
+    v.streamType = (data >> 2) & 0x3f
+    v.reserved = data & 0x01
+
+    tmp := make([]byte, 3)
+    if _, err = io.ReadFull(r, tmp); err != nil {
+        ol.E(nil, fmt.Sprintf("read DecoderConfigDescriptor bufferSizeDB failed, err is %v", err))
+        return
+    }
+    v.bufferSizeDB = Bytes3ToUint32(tmp)
+
+    if err = v.Read(r, &v.maxBitrate); err != nil {
+        ol.E(nil, fmt.Sprintf("read DecoderConfigDescriptor maxBitrate failed, err is %v", err))
+        return
+    }
+
+    if err = v.Read(r, &v.avgBitrate); err != nil {
+        ol.E(nil, fmt.Sprintf("read DecoderConfigDescriptor avgBitrate failed, err is %v", err))
+        return
+    }
+
+    ol.T(nil, fmt.Sprintf("after decode DecoderConfigDescriptor, left:%v", v.left()))
+    if v.left() > 0 {
+        if err = v.descSpecificInfo.decode(r); err != nil {
+            ol.E(nil, fmt.Sprintf("decode descSpecificInfo failed, err is %v", err))
+            return
+        }
+    }
+
+    ol.T(nil, fmt.Sprintf("decode config desc:%+v", v))
+    return
+}
+
+/**
+ * 7.3.2.3 SL Packet Header Configuration
+ * ISO_IEC_14496-1-System-2010.pdf, page 92
+ */
+type Mp4SLConfigDescriptor struct {
+    Mp4BaseDescriptor
+    predefined uint8
+}
+
+func (v *Mp4SLConfigDescriptor) decode(r io.Reader) (err error) {
+    if err = v.Mp4BaseDescriptor.decodeHeader(r); err != nil {
+        return
+    }
+
+    if err = v.Read(r, &v.predefined); err != nil {
+        ol.E(nil, fmt.Sprintf("read SL predefined failed, err is %v", err))
+        return
+    }
+    ol.T(nil, fmt.Sprintf("decde sl:predefined:%v", v.predefined))
+    return
+}
+
+/**
+ * 7.2.6.5 ES_Descriptor
+ * ISO_IEC_14496-1-System-2010.pdf, page 47
+ */
+type Mp4ES_Descriptor struct {
+    Mp4BaseDescriptor
+
+    ES_ID uint16
+    streamDependenceFlag uint8 // bit(1)
+    URL_Flag uint8 // bit(1)
+    OCRstreamFlag uint8 // bit(1)
+    streamPriority uint8 // bit(5)
+                               // if (streamDependenceFlag)
+    dependsOn_ES_ID uint16
+                               // if (URL_Flag)
+    URLlength uint8
+    URLstring []uint8
+                               // if (OCRstreamFlag)
+    OCR_ES_Id uint16
+
+    decConfigDescr *Mp4DecoderConfigDescriptor
+    slConfigDescr *Mp4SLConfigDescriptor
+}
+
+func NewMp4ES_Descriptor() *Mp4ES_Descriptor {
+    v := &Mp4ES_Descriptor{
+        decConfigDescr: NewMp4DecoderConfigDescriptor(),
+        slConfigDescr: &Mp4SLConfigDescriptor{},
+    }
+    return v
+}
+
+func (v *Mp4ES_Descriptor) decode(r io.Reader) (err error) {
+    if err = v.Mp4BaseDescriptor.decodeHeader(r); err != nil {
+        return
+    }
+
+    if err = v.Read(r, &v.ES_ID); err != nil {
+        ol.E(nil, fmt.Sprintf("read ES_Descriptor ES_ID failed, err is %v", err))
+        return
+    }
+
+    var data uint8
+    if err = v.Read(r, &data); err != nil {
+        ol.E(nil, fmt.Sprintf("read ES_Descriptor data failed, err is %v", err))
+        return
+    }
+    v.streamPriority = data & 0x1f
+    v.streamDependenceFlag = (data >> 7) & 0x01
+    v.URL_Flag = (data >> 6) & 0x01
+    v.OCRstreamFlag = (data >> 5) & 0x01
+
+    if v.streamDependenceFlag == 0x01 {
+        if err = v.Read(r, &v.dependsOn_ES_ID); err != nil {
+            ol.E(nil, fmt.Sprintf("read ES_Descriptor dependsOn_ES_ID failed, err is %v", err))
+            return
+        }
+    }
+
+    if v.URL_Flag == 0x01 {
+        if err = v.Read(r, &v.URLlength); err != nil {
+            ol.E(nil, fmt.Sprintf("read ES_Descriptor URLLength failed, err is %v", err))
+            return
+        }
+
+        v.URLstring = make([]uint8, v.URLlength)
+        if err = v.Read(r, v.URLstring); err != nil {
+            ol.E(nil, fmt.Sprintf("read ES_Descriptor URLstring failed, err is %v", err))
+            return
+        }
+    }
+
+    if v.OCRstreamFlag == 0x01 {
+        if err = v.Read(r, &v.OCR_ES_Id); err != nil {
+            ol.E(nil, fmt.Sprintf("read ES_Descriptor OCR_ES_Id failed, err is %v", err))
+            return
+        }
+    }
+
+    if err = v.decConfigDescr.decode(r); err != nil {
+        ol.E(nil, fmt.Sprintf("decode ES_Descriptor decConfigDescr failed, err is %v", err))
+        return
+    }
+    if err = v.slConfigDescr.decode(r); err != nil {
+        ol.E(nil, fmt.Sprintf("decode ES_Descriptor slConfigDescr failed, err is %v", err))
+        return
+    }
+
+    ol.T(nil, fmt.Sprintf("decode ES_Descriptor:%+v", v))
+    return
+}
+
+/**
+ * 5.6 Sample Description Boxes
+ * Elementary Stream Descriptors (esds)
+ * ISO_IEC_14496-14-MP4-2003.pdf, page 15
+ * @see http://www.mp4ra.org/codecs.html
+ */
+type Mp4EsdsBox struct {
+    Mp4FullBox
+    es *Mp4ES_Descriptor
+}
+
+func  NewMp4EsdsBox() *Mp4EsdsBox {
+    v := &Mp4EsdsBox{
+        es: NewMp4ES_Descriptor(),
+    }
+    return v
+}
+
+func (v *Mp4EsdsBox) Basic() *Mp4Box {
+    return &v.Mp4Box
+}
+
+func (v *Mp4EsdsBox) DecodeHeader(r io.Reader) (err error) {
+    if err = v.Mp4FullBox.DecodeHeader(r); err != nil {
+        return
+    }
+
+    if err = v.es.decode(r); err != nil {
+        ol.E(nil, fmt.Sprintf("decode esds box failed, err is %v", err))
+    }
+    ol.T(nil, fmt.Sprintf("before decode esds content, used=%v es_len=%v", v.UsedSize, v.es.total))
+
+    v.UsedSize += uint64(v.es.total)
+    return
+}
+
+func (v *Mp4EsdsBox) asc() (*Mp4DecoderSpecificInfo, error) {
+    return v.es.decConfigDescr.descSpecificInfo, nil
 }
 
 /**
@@ -1259,6 +1683,10 @@ func (v *Mp4SampleDescritionBox) DecodeHeader(r io.Reader) (err error) {
             return
         }
 
+        if err = subBox.Basic().DecodeBoxes(r); err != nil {
+            return
+        }
+
         v.Entries = append(v.Entries, subBox)
         v.UsedSize += subBox.Basic().sz()
 
@@ -1276,6 +1704,15 @@ func (v *Mp4SampleDescritionBox) mp4a() (*Mp4AudioSampleEntry, error) {
         }
     }
     return nil, fmt.Errorf("can't find mp4a in stsd")
+}
+
+func (v *Mp4SampleDescritionBox) avc1() (*Mp4VisualSampleEntry, error) {
+    for _, entry := range v.Entries {
+        if et, ok := entry.(*Mp4VisualSampleEntry); ok {
+            return et, nil
+        }
+    }
+    return nil, fmt.Errorf("can't find avc1 in stsd")
 }
 
 /**

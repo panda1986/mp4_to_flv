@@ -296,3 +296,31 @@ const (
     SrsMp4HandlerTypeSOUN = 0x736f756e // 'soun'
 )
 
+// Table 1 — List of Class Tags for Descriptors
+// ISO_IEC_14496-1-System-2010.pdf, page 31
+const (
+    SrsMp4ESTagESforbidden = 0x00
+    SrsMp4ESTagESObjectDescrTag = 0x01
+    SrsMp4ESTagESInitialObjectDescrTag = 0x02
+    SrsMp4ESTagESDescrTag = 0x03
+    SrsMp4ESTagESDecoderConfigDescrTag = 0x04
+    SrsMp4ESTagESDecSpecificInfoTag = 0x05
+    SrsMp4ESTagESSLConfigDescrTag = 0x06
+    SrsMp4ESTagESExtSLConfigDescrTag = 0x064
+)
+
+// Table 5 — objectTypeIndication Values
+// ISO_IEC_14496-1-System-2010.pdf, page 49
+const (
+    SrsMp4ObjectTypeForbidden = 0x00
+    // Audio ISO/IEC 14496-3
+    SrsMp4ObjectTypeAac = 0x40
+)
+
+// Table 6 — streamType Values
+// ISO_IEC_14496-1-System-2010.pdf, page 51
+const (
+    SrsMp4StreamTypeForbidden = 0x00
+    SrsMp4StreamTypeAudioStream = 0x05
+)
+

@@ -1,5 +1,7 @@
 package main
 
+import "encoding/binary"
+
 // intDataSize returns the size of the data required to represent the data when encoded.
 // It returns zero if the type cannot be implemented by the fast path in Read or Write.
 func uint64DataSize(data interface{}) uint64 {
@@ -17,4 +19,11 @@ func uint64DataSize(data interface{}) uint64 {
         return uint64(len(arru8))
     }
     return 0
+}
+
+func Bytes3ToUint32(b []byte) uint32 {
+    nb := []byte{}
+    nb = append(nb, 0)
+    nb = append(nb, b...)
+    return binary.BigEndian.Uint32(nb)
 }

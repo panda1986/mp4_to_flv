@@ -90,15 +90,19 @@ type Mp4Decoder struct {
     // The audio sound type.
     channels int
 
+    // For H.264/AVC, the avcc contains the sps/pps.
+    pavcc []uint8
     // For AAC, the asc in esds box.
-    nbAsc int
     pasc []uint8
     // Whether asc is written to reader.
     ascWritten bool
 }
 
 func NewMp4Decoder() *Mp4Decoder {
-    v := &Mp4Decoder{}
+    v := &Mp4Decoder{
+        pavcc: []uint8{},
+        pasc: []uint8{},
+    }
     return v
 }
 
@@ -157,21 +161,21 @@ func (v *Mp4Decoder) parseFtyp(box *Mp4FileTypeBox) (err error) {
     return
 }
 
-func (v *Mp4Decoder) parseMoov(box *Mp4MovieBox) (err error) {
+func (v *Mp4Decoder) parseMoov(moov *Mp4MovieBox) (err error) {
     ol.T(nil, fmt.Sprintf("...start to parse moov...."))
-    /*var mvhd *Mp4MovieHeaderBox
-    if mvhd, err = box.Mvhd(); err != nil {
+    var mvhd *Mp4MovieHeaderBox
+    if mvhd, err = moov.Mvhd(); err != nil {
         ol.E(nil, fmt.Sprintf("mp4 missing mvhd box, err is:%v", err))
         return
     }
 
     var vide *Mp4TrackBox
-    if vide, err = box.Video(); err != nil {
+    if vide, err = moov.Video(); err != nil {
         return
-    }*/
+    }
 
     var soun *Mp4TrackBox
-    if soun, err = box.Audio(); err != nil {
+    if soun, err = moov.Audio(); err != nil {
         return
     }
 
@@ -181,8 +185,44 @@ func (v *Mp4Decoder) parseMoov(box *Mp4MovieBox) (err error) {
     }
 
     sr := mp4a.sampleRate >> 16
-    ol.T(nil, fmt.Sprintf("parse result, sr=%v", sr))
+    if sr >= 44100 {
+        v.sampleRate = SrsAudioSampleRate44100
+    } else if sr >= 22050 {
+        v.sampleRate = SrsAudioSampleRate22050
+    } else if sr >= 11025 {
+        v.sampleRate = SrsAudioSampleRate11025
+    } else {
+        v.sampleRate = SrsAudioSampleRate5512
+    }
 
+    if mp4a.sampleSize == 16 {
+        v.soundBits = SrsAudioSampleBits16bit
+    } else {
+        v.soundBits = SrsAudioSampleBits8bit
+    }
+
+    if mp4a.channelCount == 2 {
+        v.channels = SrsAudioChannelsStereo
+    } else {
+        v.channels = SrsAudioChannelsMono
+    }
+
+    var avcc *Mp4AvccBox
+    if avcc, err = vide.avcc(); err != nil {
+        return
+    }
+    var asc *Mp4DecoderSpecificInfo
+    if asc, err = soun.asc(); err != nil {
+        return
+    }
+
+    v.vcodec = vide.vide_codec()
+    v.acodec = soun.soun_codec()
+
+    v.pavcc = append(v.pavcc, avcc.avcConfig...)
+    v.pasc = append(v.pasc, asc.asc...)
+
+    ol.T(nil, fmt.Sprintf("dur=%v ms, vide=%v(%v, %v BSH),soun=%v(%v,%v BSH),%v,%v,%v", mvhd.Duration(), moov.NbVideoTracks(), v.vcodec, len(v.pavcc), moov.NbSoundTracks(), v.acodec, len(v.pasc), v.channels, v.soundBits, v.sampleRate))
     return
 }
 
