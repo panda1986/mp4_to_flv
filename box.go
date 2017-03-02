@@ -68,7 +68,7 @@ func (v *Mp4Box) get(bt uint32) (Box, error) {
             return box, nil
         }
     }
-    return nil, fmt.Errorf("can't find bt:%v in boxes", bt)
+    return nil, fmt.Errorf("can't find bt:%x in boxes", bt)
 }
 
 
@@ -170,6 +170,8 @@ func (v *Mp4Box) discovery(r io.Reader) (box Box, err error) {
         box = NewMp4SampleDescritionBox()
     case SrsMp4BoxTypeSTTS:
         box = NewMp4DecodingTime2SampleBox()
+    case SrsMp4BoxTypeCTTS:
+        box = NewMp4CompositionTime2SampleBox()
     case SrsMp4BoxTypeSTSS:
         box = NewMp4SyncSampleBox()
     case SrsMp4BoxTypeSTSC:
@@ -379,18 +381,28 @@ func (v *Mp4MovieBox) Audio() (*Mp4TrackBox, error) {
     return nil, fmt.Errorf("can't find audio trak box in moov")
 }
 
-func (v *Mp4MovieBox) AddTrack() {
-
-}
-
 // Get the number of video tracks
-func (v *Mp4MovieBox) NbVideoTracks() int {
-    return 0
+func (v *Mp4MovieBox) NbVideoTracks() (nb_tracks int) {
+    for _, box := range v.Boxes {
+        if tbox, ok := box.(*Mp4TrackBox); ok {
+            if tbox.trackType() == SrsMp4TrackTypeVideo {
+                nb_tracks ++
+            }
+        }
+    }
+    return
 }
 
 // Get the number of audio tracks
-func (v *Mp4MovieBox) NbSoundTracks() int {
-    return 0
+func (v *Mp4MovieBox) NbSoundTracks() (nb_tracks int) {
+    for _, box := range v.Boxes {
+        if tbox, ok := box.(*Mp4TrackBox); ok {
+            if tbox.trackType() == SrsMp4TrackTypeAudio {
+                nb_tracks ++
+            }
+        }
+    }
+    return
 }
 
 func (v *Mp4MovieBox) Basic() *Mp4Box {
@@ -589,7 +601,7 @@ func (v *Mp4TrackBox) vide_codec() (codec int) {
         return
     } else {
         entry := box.Entries[0]
-        if _, ok := entry.(*Mp4AvccBox); ok {
+        if _, ok := entry.(*Mp4VisualSampleEntry); ok {
             codec = SrsVideoCodecIdAVC
         }
     }
@@ -617,6 +629,62 @@ func (v *Mp4TrackBox) trackType() int {
     } else {
         mdia := box.(*Mp4MediaBox)
         return mdia.trackType()
+    }
+}
+
+func (v *Mp4TrackBox) stsc() (*Mp4Sample2ChunkBox, error) {
+    if box, err := v.stbl(); err != nil {
+        return nil, err
+    } else {
+        return box.stsc()
+    }
+}
+
+func (v *Mp4TrackBox) stts() (*Mp4DecodingTime2SampleBox, error) {
+    if box, err := v.stbl(); err != nil {
+        return nil, err
+    } else {
+        return box.stts()
+    }
+}
+
+func (v *Mp4TrackBox) ctts() (*Mp4CompositionTime2SampleBox, error) {
+    if box, err := v.stbl(); err != nil {
+        return nil, err
+    } else {
+        return box.ctts()
+    }
+}
+
+func (v *Mp4TrackBox) stsz() (*Mp4SampleSizeBox, error) {
+    if box, err := v.stbl(); err != nil {
+        return nil, err
+    } else {
+        return box.stsz()
+    }
+}
+
+func (v *Mp4TrackBox) stss() (*Mp4SyncSampleBox, error) {
+    if box, err := v.stbl(); err != nil {
+        return nil, err
+    } else {
+        return box.stss()
+    }
+}
+
+func (v *Mp4TrackBox) stco() (*Mp4ChunkOffsetBox, error) {
+    if box, err := v.stbl(); err != nil {
+        return nil, err
+    } else {
+        return box.stco()
+    }
+}
+
+func (v *Mp4TrackBox) mdhd() (*Mp4MediaHeaderBox, error) {
+    if box, err := v.mdia(); err != nil {
+        return nil, err
+    } else {
+        return box.mdhd()
     }
 }
 
@@ -830,6 +898,14 @@ type Mp4MediaBox struct {
 
 func (v *Mp4MediaBox) Basic() *Mp4Box {
     return &v.Mp4Box
+}
+
+func (v *Mp4MediaBox) mdhd() (*Mp4MediaHeaderBox, error) {
+    if box, err := v.get(SrsMp4BoxTypeMDHD); err != nil {
+        return nil, err
+    } else {
+        return box.(*Mp4MediaHeaderBox), nil
+    }
 }
 
 func (v *Mp4MediaBox) minf() (*Mp4MediaInformationBox, error) {
@@ -1102,6 +1178,54 @@ type Mp4SampleTableBox struct {
 
 func (v *Mp4SampleTableBox) Basic() *Mp4Box {
     return &v.Mp4Box
+}
+
+func (v *Mp4SampleTableBox) stsc() (*Mp4Sample2ChunkBox, error) {
+    if box, err := v.get(SrsMp4BoxTypeSTSC); err != nil {
+        return nil, err
+    } else {
+        return box.(*Mp4Sample2ChunkBox), nil
+    }
+}
+
+func (v *Mp4SampleTableBox) stts() (*Mp4DecodingTime2SampleBox, error) {
+    if box, err := v.get(SrsMp4BoxTypeSTTS); err != nil {
+        return nil, err
+    } else {
+        return box.(*Mp4DecodingTime2SampleBox), nil
+    }
+}
+
+func (v *Mp4SampleTableBox) ctts() (*Mp4CompositionTime2SampleBox, error) {
+    if box, err := v.get(SrsMp4BoxTypeCTTS); err != nil {
+        return nil, err
+    } else {
+        return box.(*Mp4CompositionTime2SampleBox), nil
+    }
+}
+
+func (v *Mp4SampleTableBox) stss() (*Mp4SyncSampleBox, error) {
+    if box, err := v.get(SrsMp4BoxTypeSTSS); err != nil {
+        return nil, err
+    } else {
+        return box.(*Mp4SyncSampleBox), nil
+    }
+}
+
+func (v *Mp4SampleTableBox) stsz() (*Mp4SampleSizeBox, error) {
+    if box, err := v.get(SrsMp4BoxTypeSTSZ); err != nil {
+        return nil, err
+    } else {
+        return box.(*Mp4SampleSizeBox), nil
+    }
+}
+
+func (v *Mp4SampleTableBox) stco() (*Mp4ChunkOffsetBox, error) {
+    if box, err := v.get(SrsMp4BoxTypeSTCO); err != nil {
+        return nil, err
+    } else {
+        return box.(*Mp4ChunkOffsetBox), nil
+    }
 }
 
 func (v *Mp4SampleTableBox) stsd() (*Mp4SampleDescritionBox, error) {
@@ -1722,9 +1846,9 @@ func (v *Mp4SampleDescritionBox) avc1() (*Mp4VisualSampleEntry, error) {
 type Mp4SttsEntry struct {
     // an integer that counts the number of consecutive samples that have the given
     // duration.
-    SampleCount uint32
+    sampleCount uint32
     // an integer that gives the delta of these samples in the time-scale of the media.
-    SampleDelta uint32
+    sampleDelta uint32
 }
 
 /**
@@ -1738,15 +1862,44 @@ type Mp4SttsEntry struct {
 type Mp4DecodingTime2SampleBox struct {
     Mp4FullBox
     // an integer that gives the number of entries in the following table.
-    EntryCount uint32
-    Entries []*Mp4SttsEntry
+    entryCount uint32
+    entries    []*Mp4SttsEntry
+
+    index      uint32
+    count      uint32
 }
 
 func NewMp4DecodingTime2SampleBox() *Mp4DecodingTime2SampleBox {
     v := &Mp4DecodingTime2SampleBox{
-        Entries: []*Mp4SttsEntry{},
+        entries: []*Mp4SttsEntry{},
     }
     return v
+}
+
+func (v *Mp4DecodingTime2SampleBox) initialize_counter() (err error) {
+    v.index = 0
+    if len(v.entries) == 0 {
+        return fmt.Errorf("MP4 illegal ts, empty stts")
+    }
+
+    v.count = v.entries[0].sampleCount
+    return
+}
+
+func (v *Mp4DecodingTime2SampleBox) on_sample(sampleIndex uint32) (entry *Mp4SttsEntry, err error) {
+    if (sampleIndex + 1) > v.count {
+        v.index ++
+        if v.index >= v.entryCount {
+            err = fmt.Errorf("MP4 illegal ts, stts overflow, count=%d, index=%v", v.entryCount, v.index)
+            return
+        }
+        v.count += v.entries[v.index].sampleCount
+    }
+
+    ol.I(nil, fmt.Sprintf("stts on sample, index=%v, entries=%v", v.index, len(v.entries)))
+    entry = v.entries[v.index]
+
+    return
 }
 
 func (v *Mp4DecodingTime2SampleBox) DecodeHeader(r io.Reader) (err error) {
@@ -1754,23 +1907,23 @@ func (v *Mp4DecodingTime2SampleBox) DecodeHeader(r io.Reader) (err error) {
         return
     }
 
-    if err = v.Read(r, &v.EntryCount); err != nil {
+    if err = v.Read(r, &v.entryCount); err != nil {
         ol.E(nil, fmt.Sprintf("read stts entry count failed, err is %v", err))
         return
     }
 
-    for i := 0; i < int(v.EntryCount); i++ {
+    for i := 0; i < int(v.entryCount); i++ {
         entry := &Mp4SttsEntry{}
-        if err = v.Read(r, &entry.SampleCount); err != nil {
+        if err = v.Read(r, &entry.sampleCount); err != nil {
             ol.E(nil, fmt.Sprintf("read stts entry sample count failed, err is %v", err))
             return
         }
-        if err = v.Read(r, &entry.SampleDelta); err != nil {
+        if err = v.Read(r, &entry.sampleDelta); err != nil {
             ol.E(nil, fmt.Sprintf("read stts entry sample delta failed, err is %v", err))
             return
         }
         ol.I(nil, fmt.Sprintf("decode one stts entry, entry=%+v", entry))
-        v.Entries = append(v.Entries, entry)
+        v.entries = append(v.entries, entry)
     }
 
     ol.I(nil, fmt.Sprintf("decode stts box success, box=%+v", v))
@@ -1778,6 +1931,110 @@ func (v *Mp4DecodingTime2SampleBox) DecodeHeader(r io.Reader) (err error) {
 }
 
 func (v *Mp4DecodingTime2SampleBox) Basic() *Mp4Box {
+    return &v.Mp4Box
+}
+
+/**
+ * 8.6.1.3 Composition Time to Sample Box (ctts), for Video.
+ * ISO_IEC_14496-12-base-format-2012.pdf, page 49
+ */
+type Mp4CttsEntry struct {
+    // an integer that counts the number of consecutive samples that have the given offset.
+    sampleCount uint32
+    // uint32_t for version=0
+    // int32_t for version=1
+    // an integer that gives the offset between CT and DT, such that CT(n) = DT(n) +
+    // CTTS(n).
+    sampleOffset int64
+}
+
+/**
+* 8.6.1.3 Composition Time to Sample Box (ctts), for Video.
+* ISO_IEC_14496-12-base-format-2012.pdf, page 49
+* This box provides the offset between decoding time and composition time. In version 0 of this box the
+* decoding time must be less than the composition time, and the offsets are expressed as unsigned numbers
+* such that CT(n) = DT(n) + CTTS(n) where CTTS(n) is the (uncompressed) table entry for sample n. In version
+* 1 of this box, the composition timeline and the decoding timeline are still derived from each other, but the
+* offsets are signed. It is recommended that for the computed composition timestamps, there is exactly one with
+* the value 0 (zero).
+*/
+type Mp4CompositionTime2SampleBox struct {
+    Mp4FullBox
+    entryCount uint32
+    entries []*Mp4CttsEntry
+
+    index uint32
+    count uint32
+}
+
+func NewMp4CompositionTime2SampleBox() *Mp4CompositionTime2SampleBox {
+    v := &Mp4CompositionTime2SampleBox{
+        entries: []*Mp4CttsEntry{},
+    }
+    return v
+}
+
+func (v *Mp4CompositionTime2SampleBox) initialize_counter() (err error) {
+    v.index = 0
+    if len(v.entries) == 0 {
+        return fmt.Errorf("MP4 illegal ts, empty ctts")
+    }
+
+    v.count = v.entries[0].sampleCount
+    return
+}
+
+func (v *Mp4CompositionTime2SampleBox) on_sample(sampleIndex uint32) (entry *Mp4CttsEntry, err error) {
+    if (sampleIndex + 1) > v.count {
+        v.index ++
+        if v.index >= v.entryCount {
+            err = fmt.Errorf("MP4 illegal ts, stts overflow, count=%d, req sample_index=%v", v.entryCount, v.index)
+            return
+        }
+        v.count += v.entries[v.index].sampleCount
+    }
+
+    entry = v.entries[v.index]
+
+    return
+}
+
+func (v *Mp4CompositionTime2SampleBox) DecodeHeader(r io.Reader) (err error) {
+    if err = v.Mp4FullBox.DecodeHeader(r); err != nil {
+        return
+    }
+
+    if err = v.Read(r, &v.entryCount); err != nil {
+        ol.E(nil, fmt.Sprintf("read stts entry count failed, err is %v", err))
+        return
+    }
+
+    for i := 0; i < int(v.entryCount); i++ {
+        entry := &Mp4CttsEntry{}
+        if err = v.Read(r, &entry.sampleCount); err != nil {
+            ol.E(nil, fmt.Sprintf("read ctts entry sample count failed, err is %v", err))
+            return
+        }
+        if v.Version == 0 {
+            var offset uint32
+            v.Read(r, &offset)
+            entry.sampleOffset = int64(offset)
+        } else if v.Version == 1 {
+            var offset int32
+            v.Read(r, &offset)
+            entry.sampleOffset = int64(offset)
+        }
+        ol.I(nil, fmt.Sprintf("decode one ctts entry, entry=%+v", entry))
+        v.entries = append(v.entries, entry)
+    }
+
+    ol.I(nil, fmt.Sprintf("decode vtts box success, box=%+v", v))
+    return
+
+    return
+}
+
+func (v *Mp4CompositionTime2SampleBox) Basic() *Mp4Box {
     return &v.Mp4Box
 }
 
@@ -1801,6 +2058,16 @@ func NewMp4SyncSampleBox() *Mp4SyncSampleBox {
         SampleNumbers: []uint32{},
     }
     return v
+}
+
+func (v *Mp4SyncSampleBox) isSync(index uint32) bool {
+    var i uint32
+    for i = 0; i < v.EntryCount; i++ {
+        if (index + 1) == v.SampleNumbers[i] {
+            return true
+        }
+    }
+    return false
 }
 
 func (v *Mp4SyncSampleBox) DecodeHeader(r io.Reader) (err error) {
@@ -1835,8 +2102,16 @@ func (v *Mp4SyncSampleBox) Basic() *Mp4Box {
  * ISO_IEC_14496-12-base-format-2012.pdf, page 58
  */
 type Mp4StscEntry struct {
+    // an integer that gives the index of the first chunk in this run of chunks that share the
+    // same samples-per-chunk and sample-description-index; the index of the first chunk in a track has the
+    // value 1 (the first_chunk field in the first record of this box has the value 1, identifying that the first
+    // sample maps to the first chunk).
     FirstChunk uint32
+    // an integer that gives the number of samples in each of these chunks
     SamplesPerChunk uint32
+    // an integer that gives the index of the sample entry that describes the
+    // samples in this chunk. The index ranges from 1 to the number of sample entries in the Sample
+    // Description Box
     sampleDescriptionIndex uint32
 }
 
@@ -1853,6 +2128,8 @@ type Mp4Sample2ChunkBox struct {
     EntryCount uint32
     // the numbers of the samples that are sync samples in the stream.
     Entries []*Mp4StscEntry
+
+    index uint32
 }
 
 func NewMp4Sample2ChunkBox() *Mp4Sample2ChunkBox {
@@ -1860,6 +2137,25 @@ func NewMp4Sample2ChunkBox() *Mp4Sample2ChunkBox {
         Entries: []*Mp4StscEntry{},
     }
     return v
+}
+
+func (v *Mp4Sample2ChunkBox) initialize_counter() {
+    v.index = 0
+}
+
+func (v *Mp4Sample2ChunkBox) onChunk(chunkIndex uint32) (entry *Mp4StscEntry) {
+    // Last chunk?
+    if v.index >= v.EntryCount - 1 {
+        ol.T(nil, fmt.Sprintf("last chunk, stsc.index=%v", v.index))
+        return v.Entries[v.index]
+    }
+
+    // Move next chunk?
+    if (chunkIndex + 1 >= v.Entries[v.index + 1].FirstChunk) {
+        ol.T(nil, fmt.Sprintf("move to next chunk"))
+        v.index++;
+    }
+    return v.Entries[v.index]
 }
 
 func (v *Mp4Sample2ChunkBox) DecodeHeader(r io.Reader) (err error) {
@@ -1886,7 +2182,7 @@ func (v *Mp4Sample2ChunkBox) DecodeHeader(r io.Reader) (err error) {
             ol.E(nil, fmt.Sprintf("read stsc %v entry samples description index failed, err is %v", i ,err))
             return
         }
-        ol.I(nil, fmt.Sprintf("decode stsc entry ok, entry=%+v", entry))
+        ol.T(nil, fmt.Sprintf("decode stsc entry ok, entry=%+v", entry))
         v.Entries = append(v.Entries, entry)
     }
 
@@ -1910,19 +2206,34 @@ type Mp4SampleSizeBox struct {
     // contains that size value. If this field is set to 0, then the samples have different sizes, and those sizes
     // are stored in the sample size table. If this field is not 0, it specifies the constant sample size, and no
     // array follows.
-    SampleSize uint32
+    sampleSize  uint32
     // an integer that gives the number of samples in the track; if sample-size is 0, then it is
     // also the number of entries in the following table.
-    SampleCount uint32
+    sampleCount uint32
     // each entry_size is an integer specifying the size of a sample, indexed by its number.
-    EntrySizes []uint32
+    entrySizes  []uint32
 }
 
 func NewMp4SampleSizeBox() *Mp4SampleSizeBox {
     v := &Mp4SampleSizeBox{
-        EntrySizes: []uint32{},
+        entrySizes: []uint32{},
     }
     return v
+}
+
+func (v *Mp4SampleSizeBox) getSampleSize(index uint32) (size uint32, err error) {
+    if v.sampleSize != 0 {
+        size = v.sampleSize
+        return
+    }
+
+    if index >= v.sampleCount {
+        err = fmt.Errorf("MP4 stsz overflow, sample_count=%v, req index=%v", v.sampleCount, index)
+        return
+    }
+
+    size = v.entrySizes[index]
+    return
 }
 
 func (v *Mp4SampleSizeBox) DecodeHeader(r io.Reader) (err error) {
@@ -1930,24 +2241,24 @@ func (v *Mp4SampleSizeBox) DecodeHeader(r io.Reader) (err error) {
         return
     }
 
-    if err = v.Read(r, &v.SampleSize); err != nil {
+    if err = v.Read(r, &v.sampleSize); err != nil {
         ol.E(nil ,fmt.Sprintf("read stsz sample size failed, err is %v", err))
         return
     }
 
-    if err = v.Read(r, &v.SampleCount); err!= nil {
+    if err = v.Read(r, &v.sampleCount); err!= nil {
         ol.E(nil, fmt.Sprintf("read stsz sample count failed, err is %v", err))
         return
     }
 
-    if v.SampleSize == 0 {
-        for i := 0; i < int(v.SampleCount); i++ {
+    if v.sampleSize == 0 {
+        for i := 0; i < int(v.sampleCount); i++ {
             var size uint32
             if err = v.Read(r, &size); err != nil {
                 ol.E(nil, fmt.Sprintf("read stsz %v entry size failed, err is %v", i, err))
                 return
             }
-            v.EntrySizes = append(v.EntrySizes, size)
+            v.entrySizes = append(v.entrySizes, size)
         }
     }
 

@@ -9,55 +9,188 @@ import (
 
 // The sample struct of mp4.
 type Mp4Sample struct {
-    // The handler type, it's SrsMp4HandlerType.
-    handlerType uint32
-
-    // The dts in milliseconds.
-    dts uint32
-    // The codec id.
-    //      video: SrsVideoCodecId.
-    //      audio: SrsAudioCodecId.
-    codec uint16
-    // The frame trait, some characteristic:
-    //      video: SrsVideoAvcFrameTrait.
-    //      audio: SrsAudioAacFrameTrait.
-    frameTrait uint16
-
-    // The video pts in milliseconds. Ignore for audio.
-    pts uint32
-    // The video frame type, it's SrsVideoAvcFrameType.
-    frameType uint16
-
-    // The audio sample rate, it's SrsAudioSampleRate.
-    sampleRate uint8
-    // The audio sound bits, it's SrsAudioSampleBits.
-    soundBits uint8
-    // The audio sound type, it's SrsAudioChannels.
-    channels uint8
-
-    // The size of sample payload in bytes.
-    nbSample uint32
-    // The output sample data, user must free it by srs_mp4_free_sample.
-    sample []uint8
+    // The type of sample, audio or video.
+    sampleType int
+    // The offset of sample in file.
+    offset uint32
+    // The index of sample with a track, start from 0.
+    index uint32
+    // The dts in tbn.
+    dts uint64
+    // For video, the pts in tbn.
+    pts uint64
+    // The tbn(timebase).
+    tbn uint32
+    // For video, the frame type, whether keyframe.
+    frameType int
+    // The adjust timestamp in milliseconds.
+    // For example, we can adjust a timestamp for A/V to monotonically increase.
+    adjust int32
+    // The sample data.
+    nbData uint32
+    data []uint8
 }
 
 func NewMp4Sample() *Mp4Sample {
     v := &Mp4Sample{
-        sample: []uint8{},
+        data: []uint8{},
     }
     return v
 }
 
 type Mp4SampleManager struct {
-
+    samples []*Mp4Sample
 }
 
-func (v *Mp4SampleManager) load(box *Mp4MovieBox) (err error) {
+func NewMp4SampleManager() *Mp4SampleManager {
+    v := &Mp4SampleManager{
+        samples: []*Mp4Sample{},
+    }
+    return v
+}
+
+func (v *Mp4SampleManager) load_trak(frameType int, track *Mp4TrackBox) (tses map[uint32]*Mp4Sample, err error) {
+    var mdhd *Mp4MediaHeaderBox
+    var stco *Mp4ChunkOffsetBox
+    var stsz *Mp4SampleSizeBox
+    var stsc *Mp4Sample2ChunkBox
+    var stts *Mp4DecodingTime2SampleBox
+    var ctts *Mp4CompositionTime2SampleBox
+    var stss *Mp4SyncSampleBox
+
+    tses = make(map[uint32]*Mp4Sample)
+
+    if mdhd, err = track.mdhd(); err != nil {
+        return
+    }
+    tt := track.trackType()
+    if stco, err = track.stco(); err != nil {
+        return
+    }
+    if stsz, err = track.stsz(); err != nil {
+        return
+    }
+    if stsc, err = track.stsc(); err != nil {
+        return
+    }
+    if stts, err = track.stts(); err != nil {
+        return
+    }
+    if frameType == SrsFrameTypeVideo {
+        ctts, _ = track.ctts()
+        stss, _ = track.stss()
+    }
+
+    // Samples per chunk.
+    stsc.initialize_counter()
+    // DTS box
+    if err = stts.initialize_counter(); err != nil {
+        return
+    }
+    // CTS PTS box
+    if ctts != nil {
+        if err = ctts.initialize_counter(); err != nil {
+            return
+        }
+    }
+
+    var previous *Mp4Sample
+
+    var ci uint32
+    for ci = 0; ci < stco.EntryCount; ci ++ {
+        // The sample offset relative in chunk.
+        var sample_relative_offset uint32
+
+        // Find how many samples from stsc.
+        entry := stsc.onChunk(ci)
+
+        var i uint32
+        for i = 0; i < entry.SamplesPerChunk; i ++ {
+            sample := NewMp4Sample()
+            sample.sampleType = tt
+            if previous != nil {
+                sample.index = previous.index + 1
+            }
+            sample.tbn = mdhd.TimeScale
+            sample.offset = stco.Entries[ci] + sample_relative_offset
+
+            var sampleSize uint32
+            if sampleSize, err = stsz.getSampleSize(sample.index); err != nil {
+                return
+            }
+            sample_relative_offset += sampleSize
+
+            var sttsEntry *Mp4SttsEntry
+            if sttsEntry, err = stts.on_sample(sample.index); err != nil {
+                return
+            }
+            if previous != nil {
+                sample.dts = previous.dts + uint64(sttsEntry.sampleDelta)
+                sample.pts = sample.dts
+            }
+
+            var cttsEntry *Mp4CttsEntry
+            if ctts != nil {
+                if cttsEntry, err = ctts.on_sample(sample.index); err != nil {
+                    return
+                }
+                sample.pts = sample.dts + uint64(cttsEntry.sampleOffset)
+            }
+
+            if tt == SrsFrameTypeVideo {
+                if stss == nil || stss.isSync(sample.index) {
+                    sample.frameType = SrsVideoAvcFrameTypeKeyFrame
+                } else {
+                    sample.frameType = SrsVideoAvcFrameTypeInterFrame
+                }
+            }
+
+            sample.nbData = sampleSize
+
+            previous = sample
+            tses[sample.offset] = sample
+            ol.T(nil, fmt.Sprintf("...load one sample:%+v", sample))
+        }
+    }
+    ol.T(nil, fmt.Sprintf("total samples:%v", len(tses)))
+
+    if previous != nil && previous.index + 1 != stsz.sampleCount {
+        err = fmt.Errorf("MP4 illegal samples count, exp=%v, actual=%v", stsz.sampleCount, previous.index + 1)
+        return
+    }
+
     return
 }
 
-func (v *Mp4SampleManager) at(index int) *Mp4Sample {
-    return nil
+func (v *Mp4SampleManager) do_load(moov *Mp4MovieBox) (err error) {
+    var vide *Mp4TrackBox
+    if vide, err = moov.Video(); err != nil {
+        return
+    }
+    var vstss map[uint32]*Mp4Sample
+    if vstss, err = v.load_trak(SrsFrameTypeVideo, vide); err != nil {
+        return
+    }
+    ol.T(nil, fmt.Sprintf("load video trak ok, stss len=%v", len(vstss)))
+
+    var soun *Mp4TrackBox
+    if soun, err = moov.Audio(); err != nil {
+        return
+    }
+    var astss map[uint32]*Mp4Sample
+    if astss, err = v.load_trak(SrsFrameTypeAudio, soun); err != nil {
+        return
+    }
+    ol.T(nil, fmt.Sprintf("load audio trak ok, stss len=%v", len(astss)))
+    return
+}
+
+// Load the samples from moov. There must be atleast one track.
+func (v *Mp4SampleManager) load(moov *Mp4MovieBox) (err error) {
+    if err = v.do_load(moov); err != nil {
+        return
+    }
+    return
 }
 
 /**
@@ -221,6 +354,11 @@ func (v *Mp4Decoder) parseMoov(moov *Mp4MovieBox) (err error) {
 
     v.pavcc = append(v.pavcc, avcc.avcConfig...)
     v.pasc = append(v.pasc, asc.asc...)
+
+    if err = v.samples.load(moov); err != nil {
+        return
+    }
+    // build the samples structure from moov
 
     ol.T(nil, fmt.Sprintf("dur=%v ms, vide=%v(%v, %v BSH),soun=%v(%v,%v BSH),%v,%v,%v", mvhd.Duration(), moov.NbVideoTracks(), v.vcodec, len(v.pavcc), moov.NbSoundTracks(), v.acodec, len(v.pasc), v.channels, v.soundBits, v.sampleRate))
     return

@@ -154,23 +154,6 @@ const (
 )
 
 /**
- * The frame type, for example, audio, video or data.
- * @doc video_file_format_spec_v10_1.pdf, page 75, E.4.1 FLV Tag
- */
-const (
-    // set to the zero to reserved, for array map.
-    SrsFrameTypeReserved = 0
-    SrsFrameTypeForbidden = 0
-
-    // 8 = audio
-    SrsFrameTypeAudio = 8
-    // 9 = video
-    SrsFrameTypeVideo = 9
-    // 18 = script data
-    SrsFrameTypeScript = 18
-)
-
-/**
  * The audio sample size in bits.
  * @doc video_file_format_spec_v10_1.pdf, page 76, E.4.2 Audio Tags
  * Size of each audio sample. This parameter only pertains to
@@ -322,5 +305,51 @@ const (
 const (
     SrsMp4StreamTypeForbidden = 0x00
     SrsMp4StreamTypeAudioStream = 0x05
+)
+
+/*
+*********************************************************************
+                                FLV enums
+*********************************************************************
+*/
+/**
+ * The frame type, for example, audio, video or data.
+ * @doc video_file_format_spec_v10_1.pdf, page 75, E.4.1 FLV Tag
+ */
+const (
+    // set to the zero to reserved, for array map.
+    SrsFrameTypeReserved = 0
+    SrsFrameTypeForbidden = 0
+
+    // 8 = audio
+    SrsFrameTypeAudio = 8
+    // 9 = video
+    SrsFrameTypeVideo = 9
+    // 18 = script data
+    SrsFrameTypeScript = 18
+)
+
+/**
+ * The video AVC frame type, such as I/P/B.
+ * @doc video_file_format_spec_v10_1.pdf, page78, E.4.3.1 VIDEODATA
+ * Frame Type UB [4]
+ * Type of video frame. The following values are defined:
+ *      1 = key frame (for AVC, a seekable frame)
+ *      2 = inter frame (for AVC, a non-seekable frame)
+ *      3 = disposable inter frame (H.263 only)
+ *      4 = generated key frame (reserved for server use only)
+ *      5 = video info/command frame
+ */
+const (
+    // set to the zero to reserved, for array map.
+    SrsVideoAvcFrameTypeReserved = 0
+    SrsVideoAvcFrameTypeForbidden = 0
+    SrsVideoAvcFrameTypeReserved1 = 6
+
+    SrsVideoAvcFrameTypeKeyFrame = 1
+    SrsVideoAvcFrameTypeInterFrame = 2
+    SrsVideoAvcFrameTypeDisposableInterFrame = 3
+    SrsVideoAvcFrameTypeGeneratedKeyFrame = 4
+    SrsVideoAvcFrameTypeVideoInfoFrame = 5
 )
 
