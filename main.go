@@ -27,23 +27,14 @@ func main()  {
 
     ol.T(nil, fmt.Sprintf("the input mp4 url is: %v, output flv is:%v", mp4Url, flvUrl))
 
-    var f *os.File
-    var err error
-    if f, err = os.Open(mp4Url); err != nil {
-        ol.E(nil, fmt.Sprintf("open mp4 file failed, err is %v", err))
+    muxer := NewMuxer(mp4Url, flvUrl)
+    if err := muxer.init(); err != nil {
+        ol.E(nil, fmt.Sprintf("mux init failed, err is %v", err))
         return
     }
-    defer f.Close()
 
-    var flv *os.File
-    if flv, err = os.Create(flvUrl); err != nil {
-        ol.E(nil, fmt.Sprintf("create flv file failed, err is %v", err))
-        return
-    }
-    defer flv.Close()
-
-    if err = Mux(f, flv); err != nil {
-        ol.E(nil, fmt.Sprintf("mux mp4:%v to flv:%v failed, err is %v", mp4Url, flvUrl, err))
+    if err := muxer.mux(); err != nil {
+        ol.E(nil, fmt.Sprintf("mux do mux failed, err is %v", err))
         return
     }
 

@@ -353,3 +353,48 @@ const (
     SrsVideoAvcFrameTypeVideoInfoFrame = 5
 )
 
+/**
+ * The video AVC frame trait(characteristic).
+ * @doc video_file_format_spec_v10_1.pdf, page79, E.4.3.2 AVCVIDEOPACKET
+ * AVCPacketType IF CodecID == 7 UI8
+ * The following values are defined:
+ *      0 = AVC sequence header
+ *      1 = AVC NALU
+ *      2 = AVC end of sequence (lower level NALU sequence ender is not required or supported)
+ */
+const (
+    // set to the max value to reserved, for array map.
+    SrsVideoAvcFrameTraitReserved = 3
+    SrsVideoAvcFrameTraitForbidden = 3
+
+    SrsVideoAvcFrameTraitSequenceHeader = 0
+    SrsVideoAvcFrameTraitNALU = 1
+    SrsVideoAvcFrameTraitSequenceHeaderEOF = 2
+)
+
+/**
+ * The audio AAC frame trait(characteristic).
+ * @doc video_file_format_spec_v10_1.pdf, page 77, E.4.2 Audio Tags
+ * AACPacketType IF SoundFormat == 10 UI8
+ * The following values are defined:
+ *      0 = AAC sequence header
+ *      1 = AAC raw
+ */
+const (
+    // set to the max value to reserved, for array map.
+    SrsAudioAacFrameTraitReserved = 2
+    SrsAudioAacFrameTraitForbidden = 2
+
+    SrsAudioAacFrameTraitSequenceHeader = 0
+    SrsAudioAacFrameTraitRawData = 1
+)
+
+/**
+* E.4.1 FLV Tag, page 75
+*/
+const (
+    SRS_RTMP_TYPE_AUDIO = 8
+    SRS_RTMP_TYPE_VIDEO = 9
+    SRS_RTMP_TYPE_SCRIPT = 18
+)
+
