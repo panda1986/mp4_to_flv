@@ -48,6 +48,8 @@ func (v *Muxer) mux() (err error) {
 
         tagType, time, data := v.sampleToFlvTag(s)
         ol.T(nil, fmt.Sprintf("tagType:%v, time:%v, len data=%v, len sample=%v", tagType, time, len(data), s.size()))
+        // packet is ok.
+
     }
     return
 }
@@ -115,7 +117,7 @@ func (v *Muxer) sampleToFlvTag(s *SrsMp4Sample) (tagType uint8, time uint32, dat
             data = append(data, uint8(1))
         }
         // cts = pts - dts, where dts = flvheader->timestamp.
-        cts := s.pts - s.dts
+        cts := s.pts - s.dts // TODO: may be cts = (s.pts - s.dts) /90;
         data = append(data, to3Bytes(cts)...)
     }
 
