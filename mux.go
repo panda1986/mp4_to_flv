@@ -4,6 +4,9 @@ import (
     "os"
     ol "github.com/ossrs/go-oryx-lib/logger"
     "fmt"
+    "encoding/binary"
+    "bytes"
+    "io"
 )
 
 type Muxer struct {
@@ -37,7 +40,59 @@ func (v *Muxer) init() (err error) {
     return
 }
 
+func (v *Muxer) putAmfString(r io.Writer, data string) {
+    binary.Write(r, binary.BigEndian, uint8(AMF_DATA_TYPE_STRING))
+    binary.Write(r, binary.BigEndian, []byte(data))
+}
+
+func (v *Muxer) putAmfDouble(r io.Writer, data float64) {
+    binary.Write(r, binary.BigEndian, uint8(AMF_DATA_TYPE_NUMBER))
+    binary.Write(r, binary.BigEndian, data)
+}
+
+func (v *Muxer) encodeMetadata() (data []byte) {
+    buf := new(bytes.Buffer)
+    v.putAmfString(buf, "onMetaData")
+
+    binary.Write(buf, binary.BigEndian, uint8(AMF_DATA_TYPE_ECMA_array))
+    binary.Write(buf, binary.BigEndian, uint32(10))
+    v.putAmfString(buf, "duration")
+
+
+
+    return buf.Bytes()
+}
+
 func (v *Muxer) mux() (err error) {
+    var flv *os.File
+    if flv, err = os.Create(v.flvUrl); err != nil {
+        ol.E(nil,fmt.Sprintf("create flv file failed, err is %v", err))
+        return
+    }
+    defer flv.Close()
+
+    // FLV Header
+    binary.Write(flv, binary.BigEndian, []byte("FLV"))
+    binary.Write(flv, binary.BigEndian, uint8(1))
+
+    var flag uint8
+    if v.dec.acodec != 0 {
+        flag = flag | 0x04
+    }
+    if v.dec.vcodec != 0 {
+        flag = flag | 0x01
+    }
+    binary.Write(flv, binary.BigEndian, flag)
+
+    dataOffset := 9
+    binary.Write(flv, binary.BigEndian, uint32(dataOffset))
+    binary.Write(flv, binary.BigEndian, uint32(0)) // first prev tag size
+
+    // FLV metadata tag, type = 18
+    binary.Write(flv, binary.BigEndian, uint8(18))
+    meta := v.encodeMetadata()
+    binary.Write(flv, binary.BigEndian, meta)
+
     ol.T(nil, fmt.Sprint("start ingest mp4 to flv."))
     for {
         // Read a mp4 sample and convert to flv tag

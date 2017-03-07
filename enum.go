@@ -398,3 +398,15 @@ const (
     SRS_RTMP_TYPE_SCRIPT = 18
 )
 
+/*
+@doc video_file_format_spec_v10_1.pdf, page 80
+*/
+const (
+    AMF_DATA_TYPE_NUMBER = 0
+    AMF_DATA_TYPE_BOOLEAN = 1
+    AMF_DATA_TYPE_STRING = 2
+
+    AMF_DATA_TYPE_Reference = 7
+    AMF_DATA_TYPE_ECMA_array = 8
+)
+
