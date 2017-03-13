@@ -33,6 +33,16 @@ func Bytes3ToUint32(b []byte) uint32 {
     return binary.BigEndian.Uint32(nb)
 }
 
+func Uint32To3Bytes(data uint32) (res []byte) {
+    tmp0 := byte((data & 0x00FF0000) >> 16)
+    res = append(res, tmp0)
+    tmp1 := byte((data & 0x0000FF00) >> 8)
+    res = append(res, tmp1)
+    tmp2 := byte(data & 0x000000FF)
+    res = append(res, tmp2)
+    return res
+}
+
 func max(x, y int32) int32 {
     if x > y {
         return x

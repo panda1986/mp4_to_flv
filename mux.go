@@ -40,9 +40,14 @@ func (v *Muxer) init() (err error) {
     return
 }
 
+func (v *Muxer) putAmfStringData(r io.Writer, data string) {
+    binary.Write(r, binary.BigEndian, uint16(len(data)))
+    binary.Write(r, binary.BigEndian, []byte(data))
+}
+
 func (v *Muxer) putAmfString(r io.Writer, data string) {
     binary.Write(r, binary.BigEndian, uint8(AMF_DATA_TYPE_STRING))
-    binary.Write(r, binary.BigEndian, []byte(data))
+    v.putAmfStringData(r, data)
 }
 
 func (v *Muxer) putAmfDouble(r io.Writer, data float64) {
@@ -55,11 +60,19 @@ func (v *Muxer) encodeMetadata() (data []byte) {
     v.putAmfString(buf, "onMetaData")
 
     binary.Write(buf, binary.BigEndian, uint8(AMF_DATA_TYPE_ECMA_array))
-    binary.Write(buf, binary.BigEndian, uint32(10))
-    v.putAmfString(buf, "duration")
+    binary.Write(buf, binary.BigEndian, uint32(4))
+    v.putAmfStringData(buf, "duration")
+    v.putAmfDouble(buf, v.dec.duration / 1000)
+    //v.putAmfStringData(buf, "width")
+    //v.putAmfDouble(buf, )
+    v.putAmfStringData(buf, "audiosamplerate")
+    v.putAmfDouble(buf, float64(v.dec.sampleRate)) // need to convert to real rate
+    v.putAmfStringData(buf, "audiosamplesize")
+    v.putAmfDouble(buf, float64(v.dec.soundBits)) // need to convert to read bits
 
-
-
+    v.putAmfStringData(buf, "author")
+    v.putAmfStringData(buf, "panda--mengxiaowei@bravovcloud.com")
+    
     return buf.Bytes()
 }
 
@@ -90,9 +103,17 @@ func (v *Muxer) mux() (err error) {
 
     // FLV metadata tag, type = 18
     binary.Write(flv, binary.BigEndian, uint8(18))
+    // datasize 3 bytes
     meta := v.encodeMetadata()
+    binary.Write(flv, binary.BigEndian, Uint32To3Bytes(uint32(len(meta))))
+    // timestamp 4 bytes
+    binary.Write(flv, binary.BigEndian, uint32(0))
+    // streamId 3 bytes
+    binary.Write(flv, binary.BigEndian, []byte{0, 0, 0})
+
     binary.Write(flv, binary.BigEndian, meta)
 
+    binary.Write(flv, binary.BigEndian, uint32(len(meta) + 11)) // prev tag sze
     ol.T(nil, fmt.Sprint("start ingest mp4 to flv."))
     for {
         // Read a mp4 sample and convert to flv tag
@@ -102,9 +123,15 @@ func (v *Muxer) mux() (err error) {
         }
 
         tagType, time, data := v.sampleToFlvTag(s)
-        ol.T(nil, fmt.Sprintf("tagType:%v, time:%v, len data=%v, len sample=%v", tagType, time, len(data), s.size()))
+        binary.Write(flv, binary.BigEndian, tagType)
+        binary.Write(flv, binary.BigEndian, Uint32To3Bytes(uint32(len(data))))
+        binary.Write(flv, binary.BigEndian, Uint32To3Bytes(time))
+        binary.Write(flv, binary.BigEndian, uint8(0))
+        binary.Write(flv, binary.BigEndian, []byte{0, 0, 0})
+        binary.Write(flv, binary.BigEndian, data)
+        binary.Write(flv, binary.BigEndian, uint32(len(data) + 11))
+        //ol.T(nil, fmt.Sprintf("tagType:%v, time:%v, len data=%v %x, len sample=%v", tagType, time, len(data), len(data), s.size()))
         // packet is ok.
-
     }
     return
 }

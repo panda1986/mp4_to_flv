@@ -280,6 +280,11 @@ type Mp4Decoder struct {
     // Forbidden if no video stream.
     // TODO: FIXME: Use SrsFormat instead.
     vcodec int
+    duration float64 // uint is ms
+    width float64
+    height float64
+    vbitrate float64
+    frameRate float64
 
     // For H.264/AVC, the avcc contains the sps/pps.
     pavcc []uint8
@@ -373,6 +378,7 @@ func (v *Mp4Decoder) parseMoov(moov *Mp4MovieBox) (err error) {
         ol.E(nil, fmt.Sprintf("mp4 missing mvhd box, err is:%v", err))
         return
     }
+    v.duration = float64(mvhd.Duration())
 
     var vide *Mp4TrackBox
     if vide, err = moov.Video(); err != nil {
@@ -456,7 +462,7 @@ func (v *Mp4Decoder) readSample(mp4Url string) (s *SrsMp4Sample, err error) {
         s.nbSample = uint32(len(v.pavcc))
         s.sample = append(s.sample, v.pavcc...)
         s.frameType = SrsVideoAvcFrameTypeKeyFrame
-        s.codec = SrsVideoAvcFrameTraitSequenceHeader
+        s.frameTrait = SrsVideoAvcFrameTraitSequenceHeader
         ol.T(nil, fmt.Sprintf("make a video sh"))
         return
     }
@@ -467,7 +473,7 @@ func (v *Mp4Decoder) readSample(mp4Url string) (s *SrsMp4Sample, err error) {
         s.nbSample = uint32(len(v.pasc))
         s.sample = append(s.sample, v.pasc...)
         s.frameType = 0x00
-        s.codec = SrsAudioAacFrameTraitSequenceHeader
+        s.frameTrait = SrsAudioAacFrameTraitSequenceHeader
         ol.T(nil, fmt.Sprintf("make a audio sh"))
         return
     }
@@ -480,10 +486,10 @@ func (v *Mp4Decoder) readSample(mp4Url string) (s *SrsMp4Sample, err error) {
 
     if ms.sampleType == SrsFrameTypeVideo {
         s.handlerType = SrsMp4HandlerTypeVIDE
-        s.codec = SrsVideoAvcFrameTraitNALU
+        s.frameTrait = SrsVideoAvcFrameTraitNALU
     } else {
         s.handlerType = SrsMp4HandlerTypeSOUN
-        s.codec = SrsAudioAacFrameTraitRawData
+        s.frameTrait = SrsAudioAacFrameTraitRawData
     }
 
     s.dts = ms.dts_ms()
