@@ -153,6 +153,22 @@ const (
     SrsAudioSampleRate44100 = 3
 )
 
+type AudioSampleRate int
+
+func (v AudioSampleRate) HumanRead() int {
+    switch int(v) {
+    case 0:
+        return 5512
+    case 1:
+        return 11025
+    case 2:
+        return 22050
+    case 3:
+        return 44100
+    }
+    return 0
+}
+
 /**
  * The audio sample size in bits.
  * @doc video_file_format_spec_v10_1.pdf, page 76, E.4.2 Audio Tags
@@ -170,6 +186,18 @@ SrsAudioSampleBitsForbidden = 2
 SrsAudioSampleBits8bit = 0
 SrsAudioSampleBits16bit = 1
 )
+
+type AudioSoundBits int
+
+func (v AudioSoundBits) HumanRead() int {
+    switch int(v) {
+    case 0:
+        return 8
+    case 1:
+        return 16
+    }
+    return 0
+}
 
 /**
  * The audio channels.

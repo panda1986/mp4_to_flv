@@ -281,10 +281,8 @@ type Mp4Decoder struct {
     // TODO: FIXME: Use SrsFormat instead.
     vcodec int
     duration float64 // uint is ms
-    width float64
-    height float64
-    vbitrate float64
-    frameRate float64
+    width uint16
+    height uint16
 
     // For H.264/AVC, the avcc contains the sps/pps.
     pavcc []uint8
@@ -389,6 +387,13 @@ func (v *Mp4Decoder) parseMoov(moov *Mp4MovieBox) (err error) {
     if soun, err = moov.Audio(); err != nil {
         return
     }
+
+    var avc1 *Mp4VisualSampleEntry
+    if avc1, err = vide.avc1(); err != nil {
+        return
+    }
+    v.width = avc1.Width
+    v.height = avc1.Height
 
     var mp4a *Mp4AudioSampleEntry
     if mp4a, err = soun.mp4a(); err != nil {

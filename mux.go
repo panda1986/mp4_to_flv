@@ -60,18 +60,32 @@ func (v *Muxer) encodeMetadata() (data []byte) {
     v.putAmfString(buf, "onMetaData")
 
     binary.Write(buf, binary.BigEndian, uint8(AMF_DATA_TYPE_ECMA_array))
-    binary.Write(buf, binary.BigEndian, uint32(4))
+    binary.Write(buf, binary.BigEndian, uint32(8))
     v.putAmfStringData(buf, "duration")
     v.putAmfDouble(buf, v.dec.duration / 1000)
-    //v.putAmfStringData(buf, "width")
-    //v.putAmfDouble(buf, )
+
+    v.putAmfStringData(buf, "width")
+    v.putAmfDouble(buf, float64(v.dec.width))
+
+    v.putAmfStringData(buf, "height")
+    v.putAmfDouble(buf, float64(v.dec.height))
+
+    v.putAmfStringData(buf, "videocodecid")
+    v.putAmfDouble(buf, float64(v.dec.vcodec))
+
     v.putAmfStringData(buf, "audiosamplerate")
-    v.putAmfDouble(buf, float64(v.dec.sampleRate)) // need to convert to real rate
-    v.putAmfStringData(buf, "audiosamplesize")
-    v.putAmfDouble(buf, float64(v.dec.soundBits)) // need to convert to read bits
+    sr := AudioSampleRate(v.dec.sampleRate).HumanRead()
+    v.putAmfDouble(buf, float64(sr)) // need to convert to real rate
 
     v.putAmfStringData(buf, "author")
-    v.putAmfStringData(buf, "panda--mengxiaowei@bravovcloud.com")
+    v.putAmfString(buf, "panda-mengxiaowei@bravocloud.com")
+
+    v.putAmfStringData(buf, "audiosamplesize")
+    sb := AudioSoundBits(v.dec.soundBits).HumanRead()
+    v.putAmfDouble(buf, float64(sb)) // need to convert to read bits
+
+    v.putAmfStringData(buf, "audiocodecid")
+    v.putAmfDouble(buf, float64(v.dec.acodec))
     
     return buf.Bytes()
 }

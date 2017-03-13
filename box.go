@@ -200,7 +200,7 @@ func (v *Mp4Box) discovery(r io.Reader) (box Box, err error) {
 func (v *Mp4Box) DecodeBoxes(r io.Reader) (err error) {
     // read left space
     left := v.left()
-    ol.T(nil, fmt.Sprintf("after decode header, left space:%v", left))
+    ol.I(nil, fmt.Sprintf("after decode header, left space:%v", left))
     for {
         if left <= 0 {
             break
